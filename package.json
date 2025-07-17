@@ -1,42 +1,46 @@
 {
   "name": "avclient-livekit",
   "description": "LiveKit A/V module for FoundryVTT",
+  "packageManager": "pnpm@10.13.1",
+  "type": "module",
   "private": true,
   "repository": "https://github.com/bekriebel/fvtt-module-avclient-livekit",
   "author": "Brint E. Kriebel <fvtt-module-help@bekit.net>",
   "license": "Hippocratic-2.1",
   "scripts": {
-    "watch": "webpack --watch --config webpack.dev.js",
-    "build": "webpack --config webpack.prod.js",
-    "build:dev": "webpack --config webpack.dev.js"
+    "dev": "vite",
+    "serve:prod": "vite --mode production",
+    "build": "vite build",
+    "build:dev": "vite build --mode development",
+    "watch": "vite build --mode development --watch",
+    "watch:prod": "vite build --watch",
+    "clean": "rm -rf dist",
+    "clean:deep": "rm -rf dist node_modules"
   },
   "browserslist": [
     "defaults"
   ],
   "dependencies": {
-    "jose": "^5.2.4",
-    "livekit-client": "^1.15.13"
+    "debug": "^4.4.1",
+    "jose": "^6.0.12",
+    "livekit-client": "^2.15.3"
   },
   "devDependencies": {
-    "@league-of-foundry-developers/foundry-vtt-types": "https://github.com/League-of-Foundry-Developers/foundry-vtt-types.git",
-    "@types/jsonwebtoken": "^9.0.6",
-    "@typescript-eslint/eslint-plugin": "^7.7.1",
-    "@typescript-eslint/parser": "^7.7.1",
-    "@typhonjs-fvtt/validate-manifest": "^8.0.0",
-    "buffer": "^6.0.3",
-    "copy-webpack-plugin": "^12.0.2",
-    "crypto-browserify": "^3.12.0",
-    "eslint": "^9.1.1",
-    "process": "^0.11.10",
-    "source-map-loader": "^5.0.0",
-    "stream-browserify": "^3.0.0",
-    "terser-webpack-plugin": "^5.3.10",
-    "ts-loader": "^9.5.1",
-    "typescript": "^5.4.5",
-    "util": "^0.12.5",
-    "webpack": "^5.91.0",
-    "webpack-cli": "^5.1.4",
-    "webpack-merge": "^5.10.0"
-  },
-  "packageManager": "yarn@3.6.0"
+    "@eslint/js": "^9.31.0",
+    "@league-of-foundry-developers/foundry-vtt-types": "github:League-of-Foundry-Developers/foundry-vtt-types#main",
+    "@pixi/assets": "github:foundry-vtt-types/pixi-assets#main",
+    "@pixi/compressed-textures": "github:foundry-vtt-types/pixi-compressed-textures#main",
+    "@pixi/core": "github:foundry-vtt-types/pixi-core#main",
+    "@types/debug": "^4.1.12",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/uuid": "^10.0.0",
+    "@vitejs/plugin-basic-ssl": "^2.1.0",
+    "eslint": "^9.31.0",
+    "prettier": "3.6.2",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "8.38.0",
+    "vite": "^7.0.6",
+    "vite-plugin-checker": "0.10.1",
+    "vite-plugin-static-copy": "^3.1.1"
+  }
 }

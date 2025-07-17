@@ -1,14 +1,27 @@
 {
   "compilerOptions": {
-    "moduleResolution": "Node",
-    "sourceMap": true,
+    "target": "esnext",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+
+    // Include FVTT Types
+    "types": ["@league-of-foundry-developers/foundry-vtt-types"],
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting */
     "strict": true,
-    "target": "ES2020",
-    "types": [
-      "@league-of-foundry-developers/foundry-vtt-types",
-      "./types/avclient-livekit"
-    ]
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
   },
-  "include": ["./src/**/*"],
-  "exclude": ["node_modules"]
+  "include": ["src"]
 }

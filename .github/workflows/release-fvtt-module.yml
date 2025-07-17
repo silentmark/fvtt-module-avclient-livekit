@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           fetch-depth: 2
       - name: Check for new version
@@ -31,9 +31,11 @@ jobs:
     if: ${{ needs.check_version.outputs.module_current_version != needs.check_version.outputs.module_previous_version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
       - name: Create tag changelog
         id: changelog
         run: |
@@ -54,10 +56,10 @@ jobs:
           download: https://github.com/${{ github.repository }}/releases/download/${{ needs.check_version.outputs.module_current_version }}/${{ github.event.repository.name }}.zip
       - name: Install dependencies
         id: install_dependencies
-        run: yarn install
+        run: pnpm install
       - name: Build package
         id: build
-        run: yarn build
+        run: pnpm run build
       - name: Package module
         working-directory: ./dist
         run: |
