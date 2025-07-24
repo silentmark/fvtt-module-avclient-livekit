@@ -26,11 +26,8 @@ import {
   DisconnectReason,
   AudioPresets,
   TrackPublishOptions,
-  ScreenShareCaptureOptions,
 } from "livekit-client";
-import { LANG_NAME, MODULE_NAME, TAVERN_AUTH_SERVER } from "./utils/constants";
-import * as log from "./utils/logging";
-import { getGame, isVersion10AV } from "./utils/helpers";
+import { LANG_NAME, MODULE_NAME } from "./utils/constants";
 import LiveKitAVClient from "./LiveKitAVClient";
 import {
   LiveKitServerType,
@@ -38,7 +35,11 @@ import {
   SocketMessage,
 } from "../types/avclient-livekit";
 import { addContextOptions, breakout } from "./LiveKitBreakout";
-import { SignJWT } from "jose";
+import { Logger } from "./utils/logger";
+import { getAccessToken, getTavernAccessToken } from "./utils/auth";
+import { debounceRefreshView } from "./utils/helpers";
+
+const log = new Logger();
 
 export enum InitState {
   Uninitialized = "uninitialized",
@@ -47,17 +48,17 @@ export enum InitState {
 }
 
 export default class LiveKitClient {
-  avMaster: AVMaster;
+  avMaster: foundry.av.AVMaster;
   liveKitAvClient: LiveKitAVClient;
-  settings: AVSettings;
+  settings: foundry.av.AVSettings;
   render: () => void;
 
   audioBroadcastEnabled = false;
   audioTrack: LocalAudioTrack | null = null;
-  breakoutRoom: string | null = null;
+  breakoutRoom: string | undefined;
   connectionState: ConnectionState = ConnectionState.Disconnected;
   initState: InitState = InitState.Uninitialized;
-  liveKitParticipants: Map<string, Participant> = new Map();
+  liveKitParticipants = new Map<string, Participant>();
   liveKitRoom: Room | null = null;
   screenTracks: LocalTrack[] = [];
   useExternalAV = false;
@@ -72,7 +73,7 @@ export default class LiveKitClient {
       urlRequired: true,
       usernameRequired: true,
       passwordRequired: true,
-      tokenFunction: this.getAccessToken,
+      tokenFunction: getAccessToken,
     },
     tavern: {
       key: "tavern",
@@ -82,7 +83,7 @@ export default class LiveKitClient {
       urlRequired: false,
       usernameRequired: false,
       passwordRequired: false,
-      tokenFunction: this.getTavernAccessToken,
+      tokenFunction: getTavernAccessToken,
     },
   };
 
@@ -93,12 +94,10 @@ export default class LiveKitClient {
     this.liveKitAvClient = liveKitAvClient;
     this.settings = liveKitAvClient.settings;
 
-    this.render = debounce(
+    this.render = foundry.utils.debounce(
       this.avMaster.render.bind(this.liveKitAvClient),
-      2000
+      2000,
     );
-
-    Hooks.callAll("liveKitClientAvailable", this);
   }
 
   /* -------------------------------------------- */
@@ -108,71 +107,85 @@ export default class LiveKitClient {
   addAllParticipants(): void {
     if (!this.liveKitRoom) {
       log.warn(
-        "Attempting to add participants before the LiveKit room is available"
+        "Attempting to add participants before the LiveKit room is available",
       );
       return;
     }
 
     // Add our user to the participants list
-    const userId = getGame().user?.id;
+    const userId = game.user?.id;
     if (userId) {
       this.liveKitParticipants.set(userId, this.liveKitRoom.localParticipant);
     }
 
     // Set up all other users
-    this.liveKitRoom.participants.forEach((participant: RemoteParticipant) => {
-      this.onParticipantConnected(participant);
-    });
+    this.liveKitRoom.remoteParticipants.forEach(
+      (participant: RemoteParticipant) => {
+        this.onParticipantConnected(participant);
+      },
+    );
   }
 
-  addConnectionButtons(element: JQuery<HTMLElement>): void {
+  addConnectionButtons(element: HTMLElement): void {
     // If useExternalAV is enabled, return
     if (this.useExternalAV) {
       return;
     }
 
-    if (element.length !== 1) {
-      log.warn("Can't find CameraView configure element", element);
-      return;
-    }
+    const connectButton = document.createElement("button");
+    connectButton.type = "button";
+    connectButton.className =
+      "av-control inline-control toggle icon fa-solid fa-fw fa-toggle-off livekit-control connect hidden";
+    connectButton.dataset.tooltip = "";
+    connectButton.ariaLabel =
+      game.i18n?.localize(`${LANG_NAME}.connect`) ?? "connect";
 
-    const connectButton = $(
-      `<a class="av-control toggle livekit-control connect hidden" title="${getGame().i18n.localize(
-        `${LANG_NAME}.connect`
-      )}"><i class="fas fa-toggle-off"></i></a>`
-    );
-    connectButton.on("click", () => {
-      connectButton.toggleClass("disabled", true);
-      this.avMaster.connect();
+    const disconnectButton = document.createElement("button");
+    disconnectButton.type = "button";
+    disconnectButton.className =
+      "av-control inline-control toggle icon fa-solid fa-fw fa-toggle-on livekit-control disconnect hidden";
+    disconnectButton.dataset.tooltip = "";
+    disconnectButton.ariaLabel =
+      game.i18n?.localize(`${LANG_NAME}.disconnect`) ?? "disconnect";
+
+    connectButton.addEventListener("click", () => {
+      connectButton.classList.toggle("disabled", true);
+      this.avMaster.connect().catch((error: unknown) => {
+        log.error("Error connecting:", error);
+      });
     });
     element.before(connectButton);
 
-    const disconnectButton = $(
-      `<a class="av-control toggle livekit-control disconnect hidden" title="${getGame().i18n.localize(
-        `${LANG_NAME}.disconnect`
-      )}"><i class="fas fa-toggle-on"></i></a>`
-    );
-    disconnectButton.on("click", () => {
-      disconnectButton.toggleClass("disabled", true);
-      this.avMaster.disconnect().then(() => this.render());
+    disconnectButton.addEventListener("click", () => {
+      disconnectButton.classList.toggle("disabled", true);
+      this.avMaster
+        .disconnect()
+        .then(() => {
+          this.render();
+        })
+        .catch((error: unknown) => {
+          log.error("Error disconnecting:", error);
+        });
     });
     element.before(disconnectButton);
 
     if (this.liveKitRoom?.state === ConnectionState.Connected) {
-      disconnectButton.toggleClass("hidden", false);
+      disconnectButton.classList.toggle("hidden", false);
     } else {
-      connectButton.toggleClass("hidden", false);
+      connectButton.classList.toggle("hidden", false);
     }
   }
 
   addConnectionQualityIndicator(userId: string): void {
-    if (!getGame().settings.get(MODULE_NAME, "displayConnectionQuality")) {
+    if (!game.settings?.get(MODULE_NAME, "displayConnectionQuality")) {
       // Connection quality indicator is not enabled
       return;
     }
 
     // Get the user camera view and player name bar
-    const userCameraView = ui.webrtc?.getUserCameraView(userId);
+    const userCameraView = document.querySelector(
+      `.camera-view[data-user="${userId}"]`,
+    );
     const userNameBar = userCameraView?.querySelector(".player-name");
 
     if (userCameraView?.querySelector(".connection-quality-indicator")) {
@@ -181,84 +194,33 @@ export default class LiveKitClient {
     }
 
     const connectionQualityIndicator = $(
-      `<div class="connection-quality-indicator unknown" title="${getGame().i18n.localize(
-        `${LANG_NAME}.connectionQuality.${ConnectionQuality.Unknown}`
-      )}">`
+      `<div class="connection-quality-indicator unknown" title="${
+        game.i18n?.localize(
+          `${LANG_NAME}.connectionQuality.${ConnectionQuality.Unknown}`,
+        ) ?? "Connectin Quality Unknown"
+      }"></div>`,
     );
 
     if (userNameBar instanceof Element) {
-      if (isVersion10AV()) {
-        $(userNameBar).after(connectionQualityIndicator);
-        connectionQualityIndicator.addClass("is-version-10-av");
-
-        // @ts-expect-error Expecting error until foundry-vtt-types is updated for FVTT v10
-        const nameplateModes = AVSettings.NAMEPLATE_MODES;
-        const nameplateSetting =
-          // @ts-expect-error Expecting error until foundry-vtt-types is updated for FVTT v10
-          this.settings.client.nameplates ?? nameplateModes.BOTH;
-        if (nameplateSetting === nameplateModes.OFF) {
-          connectionQualityIndicator.addClass("no-nameplate");
-        }
-      } else {
-        $(userNameBar).prepend(connectionQualityIndicator);
-      }
+      $(userNameBar).prepend(connectionQualityIndicator);
     }
 
     this.setConnectionQualityIndicator(userId);
-  }
-
-  addToggleReceiveButtons(userId: string): void {
-    // Get the user camera view, settings, and audio element
-    const userCameraView = ui.webrtc?.getUserCameraView(userId);
-    const userSettings = getGame().webrtc?.settings.getUser(userId);
-    const userToggleAudioElement = userCameraView?.querySelector(
-      '[data-action="toggle-audio"]'
-    );
-
-    const receiveVideoState = !!userSettings?.hidden;
-    const receiveVideoTitle = receiveVideoState
-      ? getGame().i18n.localize(`${LANG_NAME}.TooltipEnableUserVideo`)
-      : getGame().i18n.localize(`${LANG_NAME}.TooltipDisableUserVideo`);
-    const receiveVideoIcon = receiveVideoState ? "fa-video-slash" : "fa-video";
-    const toggleReceiveVideoButton = $(
-      `<a class="av-control toggle livekit-control toggle-receive-video" title="${receiveVideoTitle}"><i class="fas ${receiveVideoIcon}"></i></a>`
-    );
-    toggleReceiveVideoButton.on("click", () => {
-      this.onClickToggleReceiveVideo(userId);
-    });
-
-    if (userToggleAudioElement instanceof Element) {
-      $(userToggleAudioElement).after(toggleReceiveVideoButton);
-    }
-
-    const receiveAudioState = !!userSettings?.muted;
-    const receiveAudioTitle = receiveAudioState
-      ? getGame().i18n.localize(`${LANG_NAME}.TooltipEnableUserAudio`)
-      : getGame().i18n.localize(`${LANG_NAME}.TooltipDisableUserAudio`);
-    const receiveAudioIcon = receiveAudioState
-      ? "fa-microphone-slash"
-      : "fa-microphone";
-    const toggleReceiveAudioButton = $(
-      `<a class="av-control toggle livekit-control toggle-receive-audio" title="${receiveAudioTitle}"><i class="fas ${receiveAudioIcon}"></i></a>`
-    );
-    toggleReceiveAudioButton.on("click", () => {
-      this.onClickToggleReceiveAudio(userId);
-    });
-    toggleReceiveVideoButton.after(toggleReceiveAudioButton);
   }
 
   addLiveKitServerType(liveKitServerType: LiveKitServerType): boolean {
     if (!this.isLiveKitServerType(liveKitServerType)) {
       log.error(
         "Attempted to add a LiveKitServerType that does not meet the requirements:",
-        liveKitServerType
+        liveKitServerType,
       );
       return false;
     }
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (this.liveKitServerTypes[liveKitServerType.key] !== undefined) {
       log.error(
         "Attempted to add a LiveKitServerType with a key that already exists:",
-        liveKitServerType
+        liveKitServerType,
       );
       return false;
     }
@@ -269,7 +231,7 @@ export default class LiveKitClient {
   async attachAudioTrack(
     userId: string,
     userAudioTrack: RemoteAudioTrack,
-    audioElement: HTMLAudioElement
+    audioElement: HTMLAudioElement,
   ): Promise<void> {
     if (userAudioTrack.attachedElements.includes(audioElement)) {
       log.debug(
@@ -277,12 +239,13 @@ export default class LiveKitClient {
         userAudioTrack,
         "already attached to element",
         audioElement,
-        "; skipping"
+        "; skipping",
       );
       return;
     }
 
     // Set audio output device
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (audioElement.sinkId === undefined) {
       log.warn("Your web browser does not support output audio sink selection");
     } else {
@@ -296,7 +259,7 @@ export default class LiveKitClient {
         log.error(
           "An error occurred when requesting the output audio device:",
           requestedSink,
-          message
+          message,
         );
       });
     }
@@ -318,7 +281,7 @@ export default class LiveKitClient {
 
   attachVideoTrack(
     userVideoTrack: VideoTrack,
-    videoElement: HTMLVideoElement
+    videoElement: HTMLVideoElement,
   ): void {
     if (userVideoTrack.attachedElements.includes(videoElement)) {
       log.debug(
@@ -326,7 +289,7 @@ export default class LiveKitClient {
         userVideoTrack,
         "already attached to element",
         videoElement,
-        "; skipping"
+        "; skipping",
       );
       return;
     }
@@ -341,37 +304,40 @@ export default class LiveKitClient {
   async changeAudioSource(forceStop = false): Promise<void> {
     // Force the stop of an existing track
     if (forceStop && this.audioTrack) {
-      this.liveKitRoom?.localParticipant.unpublishTrack(this.audioTrack);
+      await this.liveKitRoom?.localParticipant.unpublishTrack(this.audioTrack);
       this.audioTrack.stop();
       this.audioTrack = null;
-      getGame().user?.broadcastActivity({ av: { muted: true } });
+      game.user?.broadcastActivity({ av: { muted: true } });
     }
 
     if (
       !this.audioTrack ||
       this.settings.get("client", "audioSrc") === "disabled" ||
-      !this.avMaster.canUserBroadcastAudio(getGame().user?.id || "")
+      !this.avMaster.canUserBroadcastAudio(game.user?.id ?? "")
     ) {
       if (this.audioTrack) {
-        this.liveKitRoom?.localParticipant.unpublishTrack(this.audioTrack);
+        await this.liveKitRoom?.localParticipant.unpublishTrack(
+          this.audioTrack,
+        );
         this.audioTrack.stop();
         this.audioTrack = null;
-        getGame().user?.broadcastActivity({ av: { muted: true } });
+        game.user?.broadcastActivity({ av: { muted: true } });
       } else {
         await this.initializeAudioTrack();
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (this.audioTrack) {
           await this.liveKitRoom?.localParticipant.publishTrack(
             this.audioTrack,
-            this.trackPublishOptions
+            this.trackPublishOptions,
           );
-          getGame().user?.broadcastActivity({ av: { muted: false } });
+          game.user?.broadcastActivity({ av: { muted: false } });
           this.avMaster.render();
         }
       }
     } else {
       const audioParams = this.getAudioParams();
       if (audioParams) {
-        this.audioTrack.restartTrack(audioParams);
+        await this.audioTrack.restartTrack(audioParams);
       }
     }
   }
@@ -380,145 +346,47 @@ export default class LiveKitClient {
     if (
       !this.videoTrack ||
       this.settings.get("client", "videoSrc") === "disabled" ||
-      !this.avMaster.canUserBroadcastVideo(getGame().user?.id || "")
+      !this.avMaster.canUserBroadcastVideo(game.user?.id ?? "")
     ) {
       if (this.videoTrack) {
-        this.liveKitRoom?.localParticipant.unpublishTrack(this.videoTrack);
+        await this.liveKitRoom?.localParticipant.unpublishTrack(
+          this.videoTrack,
+        );
         this.videoTrack.detach();
         this.videoTrack.stop();
         this.videoTrack = null;
-        getGame().user?.broadcastActivity({ av: { hidden: true } });
+        game.user?.broadcastActivity({ av: { hidden: true } });
       } else {
         await this.initializeVideoTrack();
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (this.videoTrack) {
           await this.liveKitRoom?.localParticipant.publishTrack(
             this.videoTrack,
-            this.trackPublishOptions
+            this.trackPublishOptions,
           );
-          const userVideoElement = ui.webrtc?.getUserVideoElement(
-            getGame().user?.id || ""
+          const userVideoElement = document.querySelector(
+            `.camera-view[data-user="${game.user?.id ?? ""}"] video.user-video`,
           );
           if (userVideoElement instanceof HTMLVideoElement) {
             this.attachVideoTrack(this.videoTrack, userVideoElement);
           }
-          getGame().user?.broadcastActivity({ av: { hidden: false } });
+          game.user?.broadcastActivity({ av: { hidden: false } });
           this.avMaster.render();
         }
       }
     } else {
       const videoParams = this.getVideoParams();
       if (videoParams) {
-        this.videoTrack.restartTrack(videoParams);
+        await this.videoTrack.restartTrack(videoParams);
       }
     }
-  }
-
-  /**
-   * Creates a new AccessToken and returns it as a signed JWT
-   * @param apiKey API Key
-   * @param apiSecret Secret
-   * @param roomName The LiveKit room to join
-   * @param userName Display name of the FVTT user
-   * @param metadata User metadata, including the FVTT User ID
-   */
-  async getAccessToken(
-    apiKey: string,
-    secretKey: string,
-    roomName: string,
-    userName: string,
-    metadata: string
-  ): Promise<string> {
-    // Set the payload to be signed, including the permission to join the room and the user metadata
-    const tokenPayload = {
-      video: {
-        // LiveKit permission grants
-        roomJoin: true,
-        room: roomName,
-      },
-      metadata: metadata,
-    };
-
-    // Get the epoch timestamp for 15m before now for JWT not before value
-    const notBefore = Math.floor(
-      new Date(Date.now() - 1000 * (60 * 15)).getTime() / 1000
-    );
-
-    // Sign and return the JWT
-    const accessTokenJwt = await new SignJWT(tokenPayload)
-      .setIssuer(apiKey) // The configured API Key
-      .setExpirationTime("10h") // Expire after 12 hours
-      .setJti(userName) // Use the username for the JWT ID
-      .setSubject(userName) // Use the username fot the JWT Subject
-      .setNotBefore(notBefore) // Give us a 15 minute buffer in case the user's clock is set incorrectly
-      .setProtectedHeader({ alg: "HS256" })
-      .sign(new TextEncoder().encode(secretKey));
-
-    log.debug("AccessToken:", accessTokenJwt);
-    return accessTokenJwt;
-  }
-
-  /**
-   * Gets an access token from the Tavern authentication server
-   * @param apiKey API Key (unused)
-   * @param apiSecret Secret (unused)
-   * @param roomName The LiveKit room to join
-   * @param userName Display name of the FVTT user
-   * @param metadata User metadata, including the FVTT User ID
-   */
-  async getTavernAccessToken(
-    apiKey: string,
-    secretKey: string,
-    roomName: string,
-    userName: string,
-    metadata: string
-  ): Promise<string> {
-    const authServer =
-      (getGame().webrtc?.client.settings.get(
-        "world",
-        "livekit.tavernAuthServer"
-      ) as string) || TAVERN_AUTH_SERVER;
-    const token = getGame().webrtc?.client.settings.get(
-      "world",
-      "livekit.tavernPatreonToken"
-    ) as string;
-    if (!token) return "";
-    let response;
-    try {
-      response = await fetch(`${authServer}/livekit/token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          id: token,
-          room: roomName,
-          userName: userName,
-          metadata: metadata,
-        }),
-      });
-    } catch (e) {
-      log.error("Error validating Patreon account", e);
-      return "";
-    }
-    if (!response.ok) {
-      log.error("Error validating Patreon account", await response.json());
-      return "";
-    }
-    let responseText;
-    try {
-      responseText = await response.text();
-    } catch (e) {
-      log.warn("Error parsing response", e);
-      return "";
-    }
-    return responseText;
   }
 
   getAudioParams(): AudioCaptureOptions | false {
     // Determine whether the user can send audio
     const audioSrc = this.settings.get("client", "audioSrc");
     const canBroadcastAudio = this.avMaster.canUserBroadcastAudio(
-      getGame().user?.id || ""
+      game.user?.id ?? "",
     );
 
     if (
@@ -535,7 +403,7 @@ export default class LiveKitClient {
     };
 
     // Set audio parameters for music streaming mode
-    if (getGame().settings.get(MODULE_NAME, "audioMusicMode")) {
+    if (game.settings?.get(MODULE_NAME, "audioMusicMode")) {
       audioCaptureOptions.autoGainControl = false;
       audioCaptureOptions.echoCancellation = false;
       audioCaptureOptions.noiseSuppression = false;
@@ -546,17 +414,23 @@ export default class LiveKitClient {
   }
 
   getParticipantFVTTUser(participant: Participant): User | undefined {
-    const { fvttUserId } = JSON.parse(participant.metadata || "{}");
-    return getGame().users?.get(fvttUserId);
+    const { fvttUserId } = JSON.parse(participant.metadata ?? "{}") as {
+      fvttUserId: string;
+    };
+    return game.users?.get(fvttUserId);
   }
 
   getParticipantUseExternalAV(participant: Participant): boolean {
-    const { useExternalAV } = JSON.parse(participant.metadata || "{ false }");
+    const { useExternalAV } = JSON.parse(
+      participant.metadata ?? "{ false }",
+    ) as {
+      useExternalAV: boolean;
+    };
     return useExternalAV;
   }
 
   getUserAudioTrack(
-    userId: string | undefined
+    userId: string | undefined,
   ): LocalAudioTrack | RemoteAudioTrack | null {
     let audioTrack: LocalAudioTrack | RemoteAudioTrack | null = null;
 
@@ -565,15 +439,17 @@ export default class LiveKitClient {
       return audioTrack;
     }
 
-    this.liveKitParticipants.get(userId)?.audioTracks.forEach((publication) => {
-      if (
-        publication.kind === Track.Kind.Audio &&
-        (publication.track instanceof LocalAudioTrack ||
-          publication.track instanceof RemoteAudioTrack)
-      ) {
-        audioTrack = publication.track;
-      }
-    });
+    this.liveKitParticipants
+      .get(userId)
+      ?.audioTrackPublications.forEach((publication) => {
+        if (
+          publication.kind === Track.Kind.Audio &&
+          (publication.track instanceof LocalAudioTrack ||
+            publication.track instanceof RemoteAudioTrack)
+        ) {
+          audioTrack = publication.track;
+        }
+      });
     return audioTrack;
   }
 
@@ -584,7 +460,7 @@ export default class LiveKitClient {
       return "";
     }
 
-    for (const t of participant.tracks.values()) {
+    for (const t of participant.trackPublications.values()) {
       if (t.track) {
         totalBitrate += t.track.currentBitrate;
       }
@@ -598,15 +474,15 @@ export default class LiveKitClient {
   }
 
   getAllUserStatistics(): Map<string, string> {
-    const userStatistics: Map<string, string> = new Map();
-    this.liveKitParticipants.forEach((participant, userId) => {
+    const userStatistics = new Map<string, string>();
+    this.liveKitParticipants.forEach((_participant, userId) => {
       userStatistics.set(userId, this.getUserStatistics(userId));
     });
     return userStatistics;
   }
 
   getUserVideoTrack(
-    userId: string | undefined
+    userId: string | undefined,
   ): LocalVideoTrack | RemoteVideoTrack | null {
     let videoTrack: LocalVideoTrack | RemoteVideoTrack | null = null;
 
@@ -615,15 +491,17 @@ export default class LiveKitClient {
       return videoTrack;
     }
 
-    this.liveKitParticipants.get(userId)?.videoTracks.forEach((publication) => {
-      if (
-        publication.kind === Track.Kind.Video &&
-        (publication.track instanceof LocalVideoTrack ||
-          publication.track instanceof RemoteVideoTrack)
-      ) {
-        videoTrack = publication.track;
-      }
-    });
+    this.liveKitParticipants
+      .get(userId)
+      ?.videoTrackPublications.forEach((publication) => {
+        if (
+          publication.kind === Track.Kind.Video &&
+          (publication.track instanceof LocalVideoTrack ||
+            publication.track instanceof RemoteVideoTrack)
+        ) {
+          videoTrack = publication.track;
+        }
+      });
     return videoTrack;
   }
 
@@ -638,12 +516,12 @@ export default class LiveKitClient {
   getUserAudioElement(
     userId: string,
     videoElement: HTMLVideoElement | null = null,
-    audioType: Track.Source
+    audioType: Track.Source,
   ): HTMLAudioElement | null {
     // Find an existing audio element
-    let audioElement = ui.webrtc?.element.find(
-      `.camera-view[data-user=${userId}] audio.user-${audioType}-audio`
-    )[0];
+    let audioElement = ui.webrtc?.element.querySelector(
+      `.camera-view[data-user="${userId}"] audio.user-${audioType}-audio`,
+    );
 
     // If one doesn't exist, create it
     if (!audioElement && videoElement) {
@@ -655,9 +533,10 @@ export default class LiveKitClient {
       videoElement.after(audioElement);
 
       // Bind volume control for microphone audio
-      ui.webrtc?.element
-        .find(`.camera-view[data-user=${userId}] .webrtc-volume-slider`)
-        .on("change", this.onVolumeChange.bind(this));
+      const volumeSlider = ui.webrtc?.element.querySelector(
+        `.camera-view[data-user="${userId}"] .webrtc-volume-slider`,
+      );
+      volumeSlider?.addEventListener("change", this.onVolumeChange.bind(this));
     }
 
     if (audioElement instanceof HTMLAudioElement) {
@@ -698,10 +577,10 @@ export default class LiveKitClient {
       this.audioTrack &&
       !(
         this.liveKitAvClient.isVoiceAlways &&
-        this.avMaster.canUserShareAudio(getGame().user?.id || "")
+        this.avMaster.canUserShareAudio(game.user?.id ?? "")
       )
     ) {
-      this.audioTrack.mute();
+      await this.audioTrack.mute();
     }
   }
 
@@ -728,13 +607,13 @@ export default class LiveKitClient {
     // Check that mute/hidden/broadcast is toggled properly for the track
     if (
       this.videoTrack &&
-      !this.avMaster.canUserShareVideo(getGame().user?.id || "")
+      !this.avMaster.canUserShareVideo(game.user?.id ?? "")
     ) {
-      this.videoTrack.mute();
+      await this.videoTrack.mute();
     }
   }
 
-  async initializeRoom(): Promise<void> {
+  initializeRoom(): void {
     // set the LiveKit publish defaults
     const liveKitPublishDefaults = this.trackPublishOptions;
 
@@ -753,7 +632,7 @@ export default class LiveKitClient {
   }
 
   isLiveKitServerType(
-    liveKitServerType: LiveKitServerType
+    liveKitServerType: LiveKitServerType,
   ): liveKitServerType is LiveKitServerType {
     if (
       typeof liveKitServerType.key !== "string" ||
@@ -778,7 +657,7 @@ export default class LiveKitClient {
     if (!canPlayback) {
       log.warn("Cannot play audio/video, waiting for user interaction");
       this.windowClickListener =
-        this.windowClickListener || this.onWindowClick.bind(this);
+        this.windowClickListener ?? this.onWindowClick.bind(this);
       window.addEventListener("click", this.windowClickListener);
     }
   }
@@ -799,74 +678,21 @@ export default class LiveKitClient {
     if (this.audioTrack) {
       await this.liveKitRoom?.localParticipant.publishTrack(
         this.audioTrack,
-        this.trackPublishOptions
+        this.trackPublishOptions,
       );
     }
     if (this.videoTrack) {
       await this.liveKitRoom?.localParticipant.publishTrack(
         this.videoTrack,
-        this.trackPublishOptions
+        this.trackPublishOptions,
       );
     }
-  }
-
-  onClickToggleReceiveAudio(userId: string): void {
-    // Toggle audio output
-    const userSettings = this.settings.getUser(userId);
-    const userActivity = this.settings.activity[userId || ""];
-    if (!userSettings?.canBroadcastAudio) {
-      return ui.notifications?.warn(
-        `${LANG_NAME}.WarningCannotBroadcastUserAudio`,
-        {
-          localize: true,
-        }
-      );
-    }
-    if (userActivity?.muted) {
-      return ui.notifications?.warn(
-        `${LANG_NAME}.WarningCannotEnableUserAudio`,
-        {
-          localize: true,
-        }
-      );
-    }
-    this.settings?.set("client", `users.${userId}.muted`, !userSettings?.muted);
-    ui.webrtc?.render();
-  }
-
-  onClickToggleReceiveVideo(userId: string): void {
-    // Toggle video display
-    const userSettings = this.settings.getUser(userId);
-    const userActivity = this.settings.activity[userId || ""];
-
-    if (!userSettings?.canBroadcastVideo) {
-      return ui.notifications?.warn(
-        `${LANG_NAME}.WarningCannotBroadcastUserVideo`,
-        {
-          localize: true,
-        }
-      );
-    }
-    if (userActivity?.hidden) {
-      return ui.notifications?.warn(
-        `${LANG_NAME}.WarningCannotEnableUserVideo`,
-        {
-          localize: true,
-        }
-      );
-    }
-    this.settings?.set(
-      "client",
-      `users.${userId}.hidden`,
-      !userSettings?.hidden
-    );
-    ui.webrtc?.render();
   }
 
   onConnectionQualityChanged(quality: string, participant: Participant) {
     log.debug("onConnectionQualityChanged:", quality, participant);
 
-    if (!getGame().settings.get(MODULE_NAME, "displayConnectionQuality")) {
+    if (!game.settings?.get(MODULE_NAME, "displayConnectionQuality")) {
       // Connection quality indicator is not enabled
       return;
     }
@@ -877,7 +703,7 @@ export default class LiveKitClient {
       log.warn(
         "Quality changed participant",
         participant,
-        "is not an FVTT user"
+        "is not an FVTT user",
       );
       return;
     }
@@ -887,9 +713,8 @@ export default class LiveKitClient {
 
   onDisconnected(reason?: DisconnectReason): void {
     log.debug("Client disconnected", { reason });
-    let disconnectWarning = `${getGame().i18n.localize(
-      `${LANG_NAME}.onDisconnected`
-    )}`;
+    let disconnectWarning =
+      game.i18n?.localize(`${LANG_NAME}.onDisconnected`) ?? "onDisconnected";
     if (reason) {
       disconnectWarning += `: ${DisconnectReason[reason]}`;
     }
@@ -907,11 +732,14 @@ export default class LiveKitClient {
   }
 
   onGetUserContextOptions(
-    playersElement: JQuery<HTMLElement>,
-    contextOptions: ContextMenuEntry[]
+    _playersApp: foundry.applications.ui.Players,
+    contextOptions: foundry.applications.ux.ContextMenu.Entry<HTMLElement>[],
   ): void {
     // Don't add breakout options if AV is disabled
-    if (this.settings.get("world", "mode") === AVSettings.AV_MODES.DISABLED) {
+    if (
+      this.settings.get("world", "mode") ===
+      foundry.av.AVSettings.AV_MODES.DISABLED
+    ) {
       return;
     }
 
@@ -920,6 +748,8 @@ export default class LiveKitClient {
 
   onIsSpeakingChanged(userId: string | undefined, speaking: boolean): void {
     if (userId) {
+      // @ts-expect-error - ui.webrtc.setUserIsSpeaking is not in foundry-vtt-types yet
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
       ui.webrtc?.setUserIsSpeaking(userId, speaking);
     }
   }
@@ -933,7 +763,7 @@ export default class LiveKitClient {
       log.error(
         "Joining participant",
         participant,
-        "is not an FVTT user; cannot display them"
+        "is not an FVTT user; cannot display them",
       );
       return;
     }
@@ -943,10 +773,12 @@ export default class LiveKitClient {
       log.warn(
         "Joining user",
         fvttUser.id,
-        "is not listed as active. Setting to active."
+        "is not listed as active. Setting to active.",
       );
       fvttUser.active = true;
-      ui.players?.render();
+      ui.players?.render().catch((error: unknown) => {
+        log.error("Error rendering players view:", error);
+      });
     }
 
     // Save the participant to the ID mapping
@@ -957,16 +789,12 @@ export default class LiveKitClient {
       this.settings.set(
         "client",
         `users.${fvttUser.id}.liveKitBreakoutRoom`,
-        ""
+        "",
       );
     }
 
     // Set up remote participant callbacks
     this.setRemoteParticipantCallbacks(participant);
-
-    participant.tracks.forEach((publication) => {
-      this.onTrackPublished(publication, participant);
-    });
 
     // Call a debounced render
     this.render();
@@ -994,7 +822,7 @@ export default class LiveKitClient {
       this.settings.set(
         "client",
         `users.${fvttUserId}.liveKitBreakoutRoom`,
-        ""
+        "",
       );
     }
 
@@ -1011,7 +839,8 @@ export default class LiveKitClient {
   onReconnecting(): void {
     log.warn("Reconnecting to room");
     ui.notifications?.warn(
-      `${getGame().i18n.localize("WEBRTC.ConnectionLostWarning")}`
+      game.i18n?.localize("WEBRTC.ConnectionLostWarning") ??
+        "ConnectionLostWarning",
     );
   }
 
@@ -1021,30 +850,41 @@ export default class LiveKitClient {
       case "breakout":
         // Allow only GMs to issue breakout requests. Ignore requests that aren't for us.
         if (
-          getGame().users?.get(userId)?.isGM &&
-          (typeof message.breakoutRoom === "string" ||
-            message.breakoutRoom === null) &&
-          (!message.userId || message.userId === getGame().user?.id)
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          game.users?.get(userId)?.isGM &&
+          (!message.userId || message.userId === game.user.id)
         ) {
           breakout(message.breakoutRoom, this);
         }
         break;
       case "connect":
-        if (getGame().users?.get(userId)?.isGM) {
-          this.avMaster.connect();
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (game.users?.get(userId)?.isGM) {
+          this.avMaster.connect().catch((error: unknown) => {
+            log.error("Error connecting:", error);
+          });
         } else {
           log.warn("Connect socket event from non-GM user; ignoring");
         }
         break;
       case "disconnect":
-        if (getGame().users?.get(userId)?.isGM) {
-          this.avMaster.disconnect().then(() => this.render());
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (game.users?.get(userId)?.isGM) {
+          this.avMaster
+            .disconnect()
+            .then(() => {
+              this.render();
+            })
+            .catch((error: unknown) => {
+              log.error("Error disconnecting:", error);
+            });
         } else {
           log.warn("Disconnect socket event from non-GM user; ignoring");
         }
         break;
       case "render":
-        if (getGame().users?.get(userId)?.isGM) {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (game.users?.get(userId)?.isGM) {
           this.render();
         } else {
           log.warn("Render socket event from non-GM user; ignoring");
@@ -1057,7 +897,7 @@ export default class LiveKitClient {
 
   onTrackMuteChanged(
     publication: TrackPublication,
-    participant: Participant
+    participant: Participant,
   ): void {
     log.debug("onTrackMuteChanged:", publication, participant);
 
@@ -1087,7 +927,9 @@ export default class LiveKitClient {
         });
       }
     } else {
-      const userCameraView = ui.webrtc?.getUserCameraView(fvttUserId);
+      const userCameraView = document.querySelector(
+        `.camera-view[data-user="${fvttUserId}"]`,
+      );
       if (userCameraView) {
         let uiIndicator;
         if (publication.kind === Track.Kind.Audio) {
@@ -1104,60 +946,34 @@ export default class LiveKitClient {
   }
 
   onRenderCameraViews(
-    cameraviews: CameraViews,
-    html: JQuery<HTMLElement>
+    _cameraviews: foundry.applications.apps.av.CameraViews,
+    html: HTMLElement,
   ): void {
-    const cameraBox = html.find(`[data-user="${getGame().user?.id}"]`);
-    const element = cameraBox.find('[data-action="configure"]');
+    const userId = game.user?.id;
+    if (!userId) {
+      log.error("No user ID found; cannot render camera views");
+      return;
+    }
+    const cameraBox = html.querySelector(
+      `[data-user="${userId}"].user-controls`,
+    );
+    // Look for existing connection buttons
+    if (cameraBox?.querySelector(".livekit-control")) {
+      return;
+    }
+    const element = cameraBox?.querySelector('[data-action="configure"]');
+    if (!(element instanceof HTMLElement)) {
+      log.warn("Can't find CameraView configure element", element);
+      return;
+    }
     this.addConnectionButtons(element);
   }
 
-  onTrackPublished(
-    publication: RemoteTrackPublication,
-    participant: RemoteParticipant
-  ): void {
-    log.debug("onTrackPublished:", publication, participant);
-
-    // Get configured settings
-    const disableReceivingAudio = getGame().settings.get(
-      MODULE_NAME,
-      "disableReceivingAudio"
-    );
-    const disableReceivingVideo = getGame().settings.get(
-      MODULE_NAME,
-      "disableReceivingVideo"
-    );
-
-    // Skip if neither video or audio are disabled; tracks will be auto-subscribed
-    if (!disableReceivingAudio && !disableReceivingVideo) {
-      return;
-    }
-
-    // Subscribe to a track if its type hasn't been disabled
-    if (publication.kind === Track.Kind.Audio && !disableReceivingAudio) {
-      publication.setSubscribed(true);
-    } else if (
-      publication.kind === Track.Kind.Video &&
-      !disableReceivingVideo
-    ) {
-      publication.setSubscribed(true);
-    } else {
-      log.info(
-        "Not subscribing to",
-        publication.kind,
-        "track",
-        publication,
-        "for participant",
-        participant
-      );
-    }
-  }
-
-  async onTrackSubscribed(
+  onTrackSubscribed(
     track: RemoteTrack,
     publication: RemoteTrackPublication,
-    participant: RemoteParticipant
-  ): Promise<void> {
+    participant: RemoteParticipant,
+  ): void {
     log.debug("onTrackSubscribed:", track, publication, participant);
     const fvttUserId = this.getParticipantFVTTUser(participant)?.id;
 
@@ -1165,20 +981,23 @@ export default class LiveKitClient {
       log.warn(
         "Track subscribed participant",
         participant,
-        "is not an FVTT user"
+        "is not an FVTT user",
       );
       return;
     }
 
-    const videoElement = ui.webrtc?.getUserVideoElement(fvttUserId);
+    const videoElement = document.querySelector(
+      `.camera-view[data-user="${fvttUserId}"]`,
+    );
 
-    if (!videoElement) {
+    if (!(videoElement instanceof HTMLVideoElement)) {
       log.debug(
         "videoElement not yet ready for",
         fvttUserId,
         "; skipping publication",
-        publication
+        publication,
       );
+      debounceRefreshView(fvttUserId);
       return;
     }
 
@@ -1187,22 +1006,28 @@ export default class LiveKitClient {
       const audioElement = this.getUserAudioElement(
         fvttUserId,
         videoElement,
-        publication.source
+        publication.source,
       );
       if (audioElement) {
-        await this.attachAudioTrack(fvttUserId, track, audioElement);
+        this.attachAudioTrack(fvttUserId, track, audioElement).catch(
+          (error: unknown) => {
+            log.error("Error attaching audio track:", error);
+          },
+        );
       }
     } else if (track instanceof RemoteVideoTrack) {
       this.attachVideoTrack(track, videoElement);
     } else {
       log.warn("Unknown track type subscribed from publication", publication);
     }
+
+    debounceRefreshView(fvttUserId);
   }
 
   onTrackUnSubscribed(
     track: RemoteTrack,
     publication: RemoteTrackPublication,
-    participant: RemoteParticipant
+    participant: RemoteParticipant,
   ): void {
     log.debug("onTrackUnSubscribed:", track, publication, participant);
     track.detach();
@@ -1212,10 +1037,18 @@ export default class LiveKitClient {
    * Change volume control for a stream
    * @param {Event} event   The originating change event from interaction with the range input
    */
-  onVolumeChange(event: JQuery.ChangeEvent): void {
+  onVolumeChange(event: Event): void {
     const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) {
+      log.warn("Volume change event did not originate from an input element");
+      return;
+    }
     const box = input.closest(".camera-view");
-    const volume = AudioHelper.inputToVolume(input.value);
+    const volume = foundry.audio.AudioHelper.inputToVolume(input.value);
+    if (!(box instanceof HTMLElement)) {
+      log.warn("Volume change event did not originate from a camera view box");
+      return;
+    }
     const audioElements: HTMLCollection = box.getElementsByTagName("audio");
     for (const audioElement of audioElements) {
       if (audioElement instanceof HTMLAudioElement) {
@@ -1235,7 +1068,7 @@ export default class LiveKitClient {
     // Configure whether the user can send video
     const videoSrc = this.settings.get("client", "videoSrc");
     const canBroadcastVideo = this.avMaster.canUserBroadcastVideo(
-      getGame().user?.id || ""
+      game.user?.id ?? "",
     );
 
     // Set resolution higher if simulcast is enabled
@@ -1254,35 +1087,33 @@ export default class LiveKitClient {
       : false;
   }
 
-  sendJoinMessage(liveKitServer: string, accessToken: string) {
-    const foundryHost = window.location.href.replace(/(\/\/.*)\/game.*$/, "$1");
+  async sendJoinMessage(liveKitServer: string, accessToken: string) {
     // Create the url for user to join the external LiveKit web client
     const params = new URLSearchParams({
-      url: `wss://${liveKitServer}`,
+      liveKitUrl: `wss://${liveKitServer}`,
       token: accessToken,
     });
-    const url = `${foundryHost}/modules/avclient-livekit/web-client/index.html?${params.toString()}`;
+    const url = `https://meet.livekit.io/custom?${params.toString()}`;
 
-    const joinDialog = new Dialog({
-      title: getGame().i18n.localize(`${LANG_NAME}.externalAVJoinTitle`),
-      content: `<p>${getGame().i18n.localize(
-        `${LANG_NAME}.externalAVJoinMessage`
-      )}</p>`,
-      buttons: {
-        join: {
-          icon: '<i class="fas fa-check"></i>',
-          label: getGame().i18n.localize(`${LANG_NAME}.externalAVJoinButton`),
-          callback: () => window.open(url),
-        },
-        ignore: {
-          icon: '<i class="fas fa-times"></i>',
-          label: getGame().i18n.localize(`${LANG_NAME}.externalAVIgnoreButton`),
-          callback: () => log.debug("Ignoring External LiveKit join request"),
+    await foundry.applications.api.DialogV2.confirm({
+      window: { title: `${LANG_NAME}.externalAVJoinTitle` },
+      content: `<p>${
+        game.i18n?.localize(`${LANG_NAME}.externalAVJoinMessage`) ??
+        "externalAVJoinMessage"
+      }</p>`,
+      yes: {
+        label: `${LANG_NAME}.externalAVJoinButton`,
+        icon: "fa-solid fa-check",
+        callback: () => window.open(url),
+      },
+      no: {
+        label: `${LANG_NAME}.externalAVIgnoreButton`,
+        icon: "fa-solid fa-xmark",
+        callback: () => {
+          log.info("Ignoring external LiveKit join request");
         },
       },
-      default: "join",
     });
-    joinDialog.render(true);
   }
 
   setAudioEnabledState(enable: boolean): void {
@@ -1292,35 +1123,39 @@ export default class LiveKitClient {
     }
     if (this.liveKitRoom?.state !== ConnectionState.Connected) {
       log.debug(
-        "setAudioEnabledState called but LiveKit room is not connected"
+        "setAudioEnabledState called but LiveKit room is not connected",
       );
       return;
     }
 
     if (!enable && !this.audioTrack.isMuted) {
       log.debug("Muting audio track", this.audioTrack);
-      this.audioTrack.mute();
+      this.audioTrack.mute().catch((error: unknown) => {
+        log.error("Error muting audio track:", error);
+      });
     } else if (enable && this.audioTrack.isMuted) {
       log.debug("Un-muting audio track", this.audioTrack);
-      this.audioTrack.unmute();
+      this.audioTrack.unmute().catch((error: unknown) => {
+        log.error("Error un-muting audio track:", error);
+      });
     } else {
       log.debug(
-        "setAudioEnabledState called but track is already in the current state"
+        "setAudioEnabledState called but track is already in the current state",
       );
     }
   }
 
   setConnectionButtons(connected: boolean): void {
-    const userCameraView = ui.webrtc?.getUserCameraView(
-      getGame().user?.id || ""
+    const userCameraView = document.querySelector(
+      `.camera-view[data-user="${game.user?.id ?? ""}"]`,
     );
 
     if (userCameraView) {
       const connectButton = userCameraView.querySelector(
-        ".livekit-control.connect"
+        ".livekit-control.connect",
       );
       const disconnectButton = userCameraView.querySelector(
-        ".livekit-control.disconnect"
+        ".livekit-control.disconnect",
       );
 
       connectButton?.classList.toggle("hidden", connected);
@@ -1332,30 +1167,30 @@ export default class LiveKitClient {
 
   setConnectionQualityIndicator(userId: string, quality?: string): void {
     // Get the user camera view and connection quality indicator
-    const userCameraView = ui.webrtc?.getUserCameraView(userId);
+    const userCameraView = document.querySelector(
+      `.camera-view[data-user="${userId}"]`,
+    );
     const connectionQualityIndicator = userCameraView?.querySelector(
-      ".connection-quality-indicator"
+      ".connection-quality-indicator",
     );
 
-    if (!quality) {
-      quality =
-        this.liveKitParticipants.get(userId)?.connectionQuality ||
-        ConnectionQuality.Unknown;
-    }
+    quality ??=
+      this.liveKitParticipants.get(userId)?.connectionQuality ??
+      ConnectionQuality.Unknown;
 
     if (connectionQualityIndicator instanceof HTMLDivElement) {
       // Remove all existing quality classes
       connectionQualityIndicator.classList.remove(
-        ...Object.values(ConnectionQuality)
+        ...Object.values(ConnectionQuality),
       );
 
       // Add the correct quality class
       connectionQualityIndicator.classList.add(quality);
 
       // Set the hover title
-      connectionQualityIndicator.title = getGame().i18n.localize(
-        `${LANG_NAME}.connectionQuality.${quality}`
-      );
+      connectionQualityIndicator.title =
+        game.i18n?.localize(`${LANG_NAME}.connectionQuality.${quality}`) ??
+        quality;
     }
   }
 
@@ -1363,13 +1198,19 @@ export default class LiveKitClient {
     this.liveKitRoom?.localParticipant
       .on(
         ParticipantEvent.IsSpeakingChanged,
-        this.onIsSpeakingChanged.bind(this, getGame().user?.id)
+        this.onIsSpeakingChanged.bind(this, game.user?.id),
       )
       .on(ParticipantEvent.ParticipantMetadataChanged, (...args) => {
         log.debug("Local ParticipantEvent ParticipantMetadataChanged:", args);
       })
       .on(ParticipantEvent.TrackPublished, (...args) => {
         log.debug("Local ParticipantEvent TrackPublished:", args);
+      })
+      .on(ParticipantEvent.TrackSubscriptionStatusChanged, (...args) => {
+        log.debug(
+          "Local ParticipantEvent TrackSubscriptionStatusChanged:",
+          args,
+        );
       });
   }
 
@@ -1380,7 +1221,7 @@ export default class LiveKitClient {
       log.warn(
         "Participant",
         participant,
-        "is not an FVTT user; skipping setRemoteParticipantCallbacks"
+        "is not an FVTT user; skipping setRemoteParticipantCallbacks",
       );
       return;
     }
@@ -1388,7 +1229,7 @@ export default class LiveKitClient {
     participant
       .on(
         ParticipantEvent.IsSpeakingChanged,
-        this.onIsSpeakingChanged.bind(this, fvttUserId)
+        this.onIsSpeakingChanged.bind(this, fvttUserId),
       )
       .on(ParticipantEvent.ParticipantMetadataChanged, (...args) => {
         log.debug("Remote ParticipantEvent ParticipantMetadataChanged:", args);
@@ -1398,7 +1239,7 @@ export default class LiveKitClient {
   setRoomCallbacks(): void {
     if (!this.liveKitRoom) {
       log.warn(
-        "Attempted to set up room callbacks before the LiveKit room is ready"
+        "Attempted to set up room callbacks before the LiveKit room is ready",
       );
       return;
     }
@@ -1407,17 +1248,16 @@ export default class LiveKitClient {
     this.liveKitRoom
       .on(
         RoomEvent.AudioPlaybackStatusChanged,
-        this.onAudioPlaybackStatusChanged.bind(this)
+        this.onAudioPlaybackStatusChanged.bind(this),
       )
       .on(
         RoomEvent.ParticipantConnected,
-        this.onParticipantConnected.bind(this)
+        this.onParticipantConnected.bind(this),
       )
       .on(
         RoomEvent.ParticipantDisconnected,
-        this.onParticipantDisconnected.bind(this)
+        this.onParticipantDisconnected.bind(this),
       )
-      .on(RoomEvent.TrackPublished, this.onTrackPublished.bind(this))
       .on(RoomEvent.TrackSubscribed, this.onTrackSubscribed.bind(this))
       .on(RoomEvent.TrackSubscriptionFailed, (...args) => {
         log.error("RoomEvent TrackSubscriptionFailed:", args);
@@ -1431,7 +1271,7 @@ export default class LiveKitClient {
       })
       .on(
         RoomEvent.ConnectionQualityChanged,
-        this.onConnectionQualityChanged.bind(this)
+        this.onConnectionQualityChanged.bind(this),
       )
       .on(RoomEvent.Disconnected, this.onDisconnected.bind(this))
       .on(RoomEvent.Reconnecting, this.onReconnecting.bind(this))
@@ -1458,29 +1298,24 @@ export default class LiveKitClient {
         channelCount: { ideal: 2 },
       };
 
-      // Configure screen share capture options
-      const screenCaptureOptions: ScreenShareCaptureOptions = {
-        selfBrowserSurface: "include",
-        surfaceSwitching: "include",
-        systemAudio: "include",
-      };
-
       // Get screen tracks
       this.screenTracks = await createLocalScreenTracks({
         audio: screenAudioOptions,
       });
 
-      this.screenTracks.forEach(async (screenTrack: LocalTrack) => {
+      for (const screenTrack of this.screenTracks) {
         log.debug("screenTrack enable:", screenTrack);
         if (screenTrack instanceof LocalVideoTrack) {
           // Stop our local video track
           if (this.videoTrack) {
-            this.liveKitRoom?.localParticipant.unpublishTrack(this.videoTrack);
+            await this.liveKitRoom?.localParticipant.unpublishTrack(
+              this.videoTrack,
+            );
           }
 
           // Attach the screen share video to our video element
-          const userVideoElement = ui.webrtc?.getUserVideoElement(
-            getGame().user?.id || ""
+          const userVideoElement = document.querySelector(
+            `.camera-view[data-user="${game.user?.id ?? ""}"]`,
           );
           if (userVideoElement instanceof HTMLVideoElement) {
             this.attachVideoTrack(screenTrack, userVideoElement);
@@ -1490,56 +1325,46 @@ export default class LiveKitClient {
         // Get publishing options
         const screenTrackPublishOptions = this.trackPublishOptions;
 
-        // Use the music mode bitrate
-        const audioMusicModeRate =
-          ((getGame().settings.get(
-            MODULE_NAME,
-            "audioMusicModeRate"
-          ) as number) || 96) * 1000;
-        screenTrackPublishOptions.audioBitrate = audioMusicModeRate;
+        // Use musicHighQuality audio preset for screen share
+        screenTrackPublishOptions.audioPreset = AudioPresets.musicHighQuality;
 
         // Publish the track
         await this.liveKitRoom?.localParticipant.publishTrack(
           screenTrack,
-          screenTrackPublishOptions
+          screenTrackPublishOptions,
         );
-      });
+      }
     } else {
-      this.screenTracks.forEach(async (screenTrack: LocalTrack) => {
+      for (const screenTrack of this.screenTracks) {
         log.debug("screenTrack disable:", screenTrack);
         // Unpublish the screen share track
-        this.liveKitRoom?.localParticipant.unpublishTrack(screenTrack);
+        await this.liveKitRoom?.localParticipant.unpublishTrack(screenTrack);
 
         // Restart our video track
         if (screenTrack instanceof LocalVideoTrack && this.videoTrack) {
           await this.liveKitRoom?.localParticipant.publishTrack(
             this.videoTrack,
-            this.trackPublishOptions
+            this.trackPublishOptions,
           );
 
           if (!this.videoTrack.isMuted) {
-            this.videoTrack.unmute();
+            await this.videoTrack.unmute();
           }
         }
-      });
+      }
     }
   }
 
   get trackPublishOptions(): TrackPublishOptions {
     const trackPublishOptions: TrackPublishOptions = {
-      audioBitrate: AudioPresets.music.maxBitrate,
+      audioPreset: AudioPresets.speech,
       simulcast: true,
       videoCodec: "vp8",
       videoSimulcastLayers: [VideoPresets43.h180, VideoPresets43.h360],
     };
 
-    if (getGame().settings.get(MODULE_NAME, "audioMusicMode")) {
-      const audioMusicModeRate =
-        ((getGame().settings.get(
-          MODULE_NAME,
-          "audioMusicModeRate"
-        ) as number) || 96) * 1000;
-      trackPublishOptions.audioBitrate = audioMusicModeRate;
+    if (game.settings?.get(MODULE_NAME, "audioMusicMode")) {
+      trackPublishOptions.audioPreset = AudioPresets.musicHighQuality;
     }
 
     return trackPublishOptions;

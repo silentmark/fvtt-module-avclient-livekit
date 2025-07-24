@@ -1,120 +1,200 @@
-import { MODULE_NAME } from "./constants";
-import { delayReload, getGame, registerModuleSetting } from "./helpers";
-import * as log from "./logging";
+import { MODULE_NAME, TAVERN_AUTH_SERVER } from "./constants";
+import { Logger } from "./logger";
+import debug from "debug";
+
+const log = new Logger();
 
 export default function registerModuleSettings(): void {
-  registerModuleSetting({
-    name: "displayConnectionQuality",
+  game.settings?.register(MODULE_NAME, "displayConnectionQuality", {
+    name: "LIVEKITAVCLIENT.displayConnectionQuality",
+    hint: "LIVEKITAVCLIENT.displayConnectionQualityHint",
     scope: "client",
     config: true,
     default: true,
-    type: Boolean,
-    onChange: () => getGame().webrtc?.render(),
+    type: new foundry.data.fields.BooleanField({ initial: true }),
+    onChange: () => game.webrtc?.render(),
   });
 
-  registerModuleSetting({
-    name: "audioMusicMode",
-    scope: "client",
-    config: true,
-    default: false,
-    type: Boolean,
-    onChange: () => {
-      // Re-register settings to update visibility of audioMusicModeRate
-      registerModuleSettings();
-      getGame().webrtc?.client._liveKitClient.changeAudioSource(true);
-    },
-  });
-
-  registerModuleSetting<number>({
-    name: "audioMusicModeRate",
-    scope: "client",
-    config: getGame().settings.get(MODULE_NAME, "audioMusicMode") === true,
-    default: 96,
-    type: Number,
-    range: {
-      min: 8,
-      max: 224,
-      step: 8,
-    },
-    onChange: () =>
-      getGame().webrtc?.client._liveKitClient.changeAudioSource(true),
-  });
-
-  registerModuleSetting({
-    name: "disableReceivingAudio",
-    scope: "client",
-    config: true,
-    default: false,
-    type: Boolean,
-    onChange: () => getGame().webrtc?.connect(),
-  });
-
-  registerModuleSetting({
-    name: "disableReceivingVideo",
-    scope: "client",
-    config: true,
-    default: false,
-    type: Boolean,
-    onChange: () => getGame().webrtc?.connect(),
-  });
-
-  registerModuleSetting({
-    name: "simulcast",
+  game.settings?.register(MODULE_NAME, "liveKitConnectionSettings", {
+    name: "LIVEKITAVCLIENT.liveKitConnectionSettings",
+    hint: "LIVEKITAVCLIENT.liveKitConnectionSettingsHint",
     scope: "world",
     config: false,
-    default: true,
-    type: Boolean,
-    onChange: () => getGame().webrtc?.connect(),
+    default: {},
+    requiresReload: true,
   });
 
-  registerModuleSetting({
-    name: "useExternalAV",
+  game.settings?.register(MODULE_NAME, "tavernPatreonToken", {
+    name: "LIVEKITAVCLIENT.tavernPatreonToken",
+    hint: "LIVEKITAVCLIENT.tavernPatreonTokenHint",
+    scope: "world",
+    config: false,
+    default: "",
+    type: new foundry.data.fields.StringField({
+      required: false,
+      blank: true,
+      initial: "",
+    }),
+    requiresReload: true,
+  });
+
+  game.settings?.register(MODULE_NAME, "breakoutRoomRegistry", {
+    name: "LIVEKITAVCLIENT.breakoutRoomRegistry",
+    hint: "LIVEKITAVCLIENT.breakoutRoomRegistryHint",
+    scope: "client",
+    config: false,
+    default: {},
+    requiresReload: false,
+  });
+
+  game.settings?.register(MODULE_NAME, "audioMusicMode", {
+    name: "LIVEKITAVCLIENT.audioMusicMode",
+    hint: "LIVEKITAVCLIENT.audioMusicModeHint",
     scope: "client",
     config: true,
     default: false,
-    type: Boolean,
-    onChange: () => delayReload(),
+    type: new foundry.data.fields.BooleanField({ initial: false }),
+    onChange: () => {
+      game.webrtc?.client._liveKitClient
+        .changeAudioSource(true)
+        .catch((error: unknown) => {
+          log.error("audioMusicMode: Error changing audio source", error);
+        });
+    },
   });
 
-  registerModuleSetting({
-    name: "resetRoom",
+  game.settings?.register(MODULE_NAME, "useExternalAV", {
+    name: "LIVEKITAVCLIENT.useExternalAV",
+    hint: "LIVEKITAVCLIENT.useExternalAVHint",
+    scope: "client",
+    config: true,
+    default: false,
+    type: new foundry.data.fields.BooleanField({ initial: false }),
+    requiresReload: true,
+  });
+
+  game.settings?.register(MODULE_NAME, "resetRoom", {
+    name: "LIVEKITAVCLIENT.resetRoom",
+    hint: "LIVEKITAVCLIENT.resetRoomHint",
     scope: "world",
     config: true,
     default: false,
-    type: Boolean,
-    onChange: (value) => {
-      if (value === true && getGame().user?.isGM) {
+    type: new foundry.data.fields.BooleanField({ initial: false }),
+    onChange: (value: boolean | null) => {
+      if (value && game.user?.isGM) {
         log.warn("Resetting meeting room ID");
-        getGame().settings.set(MODULE_NAME, "resetRoom", false);
-        getGame().webrtc?.client.settings.set(
-          "world",
-          "server.room",
-          randomID(32)
-        );
+        game.settings
+          .set(MODULE_NAME, "resetRoom", false)
+          .then(() => {
+            const liveKitConnectionSettings = game.settings.get(
+              MODULE_NAME,
+              "liveKitConnectionSettings",
+            );
+            liveKitConnectionSettings.room = foundry.utils.randomID(32);
+            game.settings
+              .set(
+                MODULE_NAME,
+                "liveKitConnectionSettings",
+                liveKitConnectionSettings,
+              )
+              .catch((error: unknown) => {
+                log.error("Error setting liveKitConnectionSettings:", error);
+              });
+          })
+          .catch((error: unknown) => {
+            log.error("Error resetting meeting room ID", error);
+          });
       }
     },
+    requiresReload: true,
   });
 
   // Register debug logging setting
-  registerModuleSetting({
-    name: "debug",
+  game.settings?.register(MODULE_NAME, "debug", {
+    name: "LIVEKITAVCLIENT.debug",
+    hint: "LIVEKITAVCLIENT.debugHint",
     scope: "world",
     config: true,
     default: false,
-    type: Boolean,
-    onChange: () => delayReload(),
+    type: new foundry.data.fields.BooleanField({ initial: false }),
+    requiresReload: true,
   });
 
-  // Set the initial debug level
-  log.setDebug(getGame().settings.get(MODULE_NAME, "debug") === true);
-
-  // Register livekit trace logging setting
-  registerModuleSetting({
-    name: "liveKitTrace",
+  // Register debug trace logging setting
+  game.settings?.register(MODULE_NAME, "liveKitTrace", {
+    name: "LIVEKITAVCLIENT.liveKitTrace",
+    hint: "LIVEKITAVCLIENT.liveKitTraceHint",
     scope: "world",
-    config: getGame().settings.get(MODULE_NAME, "debug") === true,
+    config: game.settings.get(MODULE_NAME, "debug") ?? false,
     default: false,
-    type: Boolean,
-    onChange: () => delayReload(),
+    type: new foundry.data.fields.BooleanField({ initial: false }),
+    requiresReload: true,
   });
+
+  // Register devMode setting
+  game.settings?.register(MODULE_NAME, "devMode", {
+    name: "LIVEKITAVCLIENT.devMode",
+    hint: "LIVEKITAVCLIENT.devModeHint",
+    scope: "world",
+    config: import.meta.env.MODE === "development",
+    default: false,
+    type: new foundry.data.fields.BooleanField({ initial: false }),
+    requiresReload: true,
+  });
+
+  //
+  // devMode Settings
+  //
+
+  // TODO: The value for the authServer should be set by the selected LiveKit server
+  // Register auth server setting
+  game.settings?.register(MODULE_NAME, "authServer", {
+    name: "LIVEKITAVCLIENT.authServer",
+    hint: "LIVEKITAVCLIENT.authServerHint",
+    scope: "world",
+    config: game.settings.get(MODULE_NAME, "devMode") ?? false,
+    default: TAVERN_AUTH_SERVER,
+    type: new foundry.data.fields.StringField({
+      required: true,
+      blank: false,
+      initial: TAVERN_AUTH_SERVER,
+    }),
+    requiresReload: true,
+  });
+
+  // Register forced TURN setting
+  game.settings?.register(MODULE_NAME, "forceTurn", {
+    name: "LIVEKITAVCLIENT.forceTurn",
+    hint: "LIVEKITAVCLIENT.forceTurnHint",
+    scope: "world",
+    config: game.settings.get(MODULE_NAME, "devMode") ?? false,
+    default: false,
+    type: new foundry.data.fields.BooleanField({ initial: false }),
+    requiresReload: true,
+  });
+
+  //
+  // Set the initial debug level
+  //
+  if (game.settings?.get(MODULE_NAME, "debug")) {
+    if (game.settings.get(MODULE_NAME, "liveKitTrace")) {
+      debug.enable("*");
+      log.info("Enabling trace logging");
+    } else {
+      debug.enable(
+        `${MODULE_NAME}:DEBUG,${MODULE_NAME}:DEBUG:*,${MODULE_NAME}:INFO,${MODULE_NAME}:INFO:*,${MODULE_NAME}:WARN,${MODULE_NAME}:WARN:*,${MODULE_NAME}:ERROR,${MODULE_NAME}:ERROR:*`,
+      );
+      log.info("Enabling debug logging");
+    }
+    // Enable Foundry AV debug logging
+    CONFIG.debug.av = true;
+    CONFIG.debug.avclient = true;
+  } else {
+    debug.enable(
+      `${MODULE_NAME}:INFO,${MODULE_NAME}:INFO:*,${MODULE_NAME}:WARN,${MODULE_NAME}:WARN:*,${MODULE_NAME}:ERROR,${MODULE_NAME}:ERROR:*`,
+    );
+    // Disable Foundry AV debug logging
+    CONFIG.debug.av = false;
+    CONFIG.debug.avclient = false;
+  }
 }

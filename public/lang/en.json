@@ -31,6 +31,7 @@
   "LIVEKITAVCLIENT.resetRoom": "Reset meeting room ID",
   "LIVEKITAVCLIENT.resetRoomHint": "Reset the meeting room ID used for your A/V",
   "LIVEKITAVCLIENT.serverType": "LiveKit Server",
+  "LIVEKITAVCLIENT.serverTypeNotes": "Type of LiveKit server to connect to",
   "LIVEKITAVCLIENT.serverTypeCustom": "Custom",
   "LIVEKITAVCLIENT.serverDetailsCustom": "<a href=\"https://github.com/bekriebel/fvtt-module-avclient-livekit#running-your-own-livekit-server\">Running your own LiveKit server</a>",
   "LIVEKITAVCLIENT.serverTypeTavern": "At the Tavern Patreon",
@@ -74,5 +75,12 @@
   "LIVEKITAVCLIENT.WarningCannotBroadcastUserVideo": "You cannot enable the user's camera because they to not have permission to broadcast their video feed.",
   "LIVEKITAVCLIENT.WarningCannotBroadcastUserAudio": "You cannot enable the user's microphone because they to not have permission to broadcast their audio feed.",
   "LIVEKITAVCLIENT.WarningCannotEnableUserVideo": "You cannot enable the user's camera because they have hidden themselves.",
-  "LIVEKITAVCLIENT.WarningCannotEnableUserAudio": "You cannot enable the user's microphone because they have muted themselves."
+  "LIVEKITAVCLIENT.WarningCannotEnableUserAudio": "You cannot enable the user's microphone because they have muted themselves.",
+  "LIVEKITAVCLIENT.authServer": "Tavern Auth Server",
+  "LIVEKITAVCLIENT.authServerHint": "The server used for authenticating to At the Tavern's Patreon LiveKit cluster",
+  "LIVEKITAVCLIENT.devMode": "Enable developer mode",
+  "LIVEKITAVCLIENT.devModeHint": "Adds additional developer settings",
+  "LIVEKITAVCLIENT.forceTurn": "Required TURN relay",
+  "LIVEKITAVCLIENT.forceTurnHint": "Sets connection to required relaying via TURN",
+  "WEBRTC.TABS.livekit": "LiveKit AVClient"
 }

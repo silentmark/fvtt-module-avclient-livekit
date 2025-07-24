@@ -1,138 +1,155 @@
-import LiveKitClient from "./LiveKitClient";
+import LiveKitClient from "./LiveKitClient.js";
 import { LANG_NAME, MODULE_NAME } from "./utils/constants";
-import { getGame } from "./utils/helpers";
 
-import * as log from "./utils/logging";
+import { Logger } from "./utils/logger.js";
+
+const log = new Logger("LiveKitBreakout");
+
+export function getBreakoutRoom(userId: string): string | undefined {
+  const breakoutRoomRegistry =
+    game.settings?.get(MODULE_NAME, "breakoutRoomRegistry") ?? {};
+
+  return breakoutRoomRegistry[userId];
+}
+
+export async function setBreakoutRoom(
+  userId: string,
+  breakoutRoom?: string,
+): Promise<void> {
+  const breakoutRoomRegistry =
+    game.settings?.get(MODULE_NAME, "breakoutRoomRegistry") ?? {};
+  breakoutRoomRegistry[userId] = breakoutRoom;
+  await game.settings?.set(
+    MODULE_NAME,
+    "breakoutRoomRegistry",
+    breakoutRoomRegistry,
+  );
+}
 
 export function addContextOptions(
-  contextOptions: ContextMenuEntry[],
-  liveKitClient: LiveKitClient
+  contextOptions: foundry.applications.ux.ContextMenu.Entry<HTMLElement>[],
+  liveKitClient: LiveKitClient,
 ): void {
-  // Add breakout options to the playerlist context menus
+  // Add breakout options to the player list context menus
   contextOptions.push(
     {
-      name: getGame().i18n.localize(`${LANG_NAME}.startAVBreakout`),
+      name:
+        game.i18n?.localize(`${LANG_NAME}.startAVBreakout`) ??
+        "Start AV Breakout",
       icon: '<i class="fa fa-comment"></i>',
       condition: (players) => {
-        const userId: string = players[0].dataset.userId || "";
-        const liveKitBreakoutRoom = liveKitClient.settings.get(
-          "client",
-          `users.${userId}.liveKitBreakoutRoom`
-        );
+        const userId: string = players.dataset.userId ?? "";
         return (
-          getGame().user?.isGM === true &&
-          !liveKitBreakoutRoom &&
-          userId !== getGame().user?.id &&
-          !liveKitClient.isUserExternal(userId)
+          game.user?.isGM === true &&
+          !getBreakoutRoom(userId) &&
+          userId !== game.user.id
         );
       },
       callback: (players) => {
-        const breakoutRoom = randomID(32);
-        startBreakout(players.data("user-id"), breakoutRoom, liveKitClient);
+        const breakoutRoom = foundry.utils.randomID(32);
+        if (!players.dataset.userId) {
+          log.warn("No userId found in players dataset, cannot start breakout");
+          return;
+        }
+        _startBreakout(players.dataset.userId, breakoutRoom);
         breakout(breakoutRoom, liveKitClient);
       },
     },
     {
-      name: getGame().i18n.localize(`${LANG_NAME}.joinAVBreakout`),
+      name:
+        game.i18n?.localize(`${LANG_NAME}.joinAVBreakout`) ?? "joinAVBreakout",
       icon: '<i class="fas fa-comment-dots"></i>',
       condition: (players) => {
-        const userId: string = players[0].dataset.userId || "";
-        const liveKitBreakoutRoom = liveKitClient.settings.get(
-          "client",
-          `users.${userId}.liveKitBreakoutRoom`
-        );
+        const userId: string = players.dataset.userId ?? "";
+        const breakoutRoom = getBreakoutRoom(userId);
         return (
-          getGame().user?.isGM === true &&
-          !!liveKitBreakoutRoom &&
-          liveKitClient.breakoutRoom !== liveKitBreakoutRoom &&
-          userId !== getGame().user?.id
+          game.user?.isGM === true &&
+          !!breakoutRoom &&
+          liveKitClient.breakoutRoom !== breakoutRoom &&
+          userId !== game.user.id
         );
       },
       callback: (players) => {
-        const userId: string = players[0].dataset.userId || "";
-        const liveKitBreakoutRoom = liveKitClient.settings.get(
-          "client",
-          `users.${userId}.liveKitBreakoutRoom`
-        );
-        if (typeof liveKitBreakoutRoom === "string") {
-          breakout(liveKitBreakoutRoom, liveKitClient);
+        const userId: string = players.dataset.userId ?? "";
+        const breakoutRoom = getBreakoutRoom(userId);
+        if (breakoutRoom) {
+          breakout(breakoutRoom, liveKitClient);
         }
       },
     },
     {
-      name: getGame().i18n.localize(`${LANG_NAME}.pullToAVBreakout`),
+      name:
+        game.i18n?.localize(`${LANG_NAME}.pullToAVBreakout`) ??
+        "pullToAVBreakout",
       icon: '<i class="fas fa-comments"></i>',
       condition: (players) => {
-        const userId: string = players[0].dataset.userId || "";
-        const liveKitBreakoutRoom = liveKitClient.settings.get(
-          "client",
-          `users.${userId}.liveKitBreakoutRoom`
-        );
+        const userId: string = players.dataset.userId ?? "";
         return (
-          getGame().user?.isGM === true &&
+          game.user?.isGM === true &&
           !!liveKitClient.breakoutRoom &&
-          liveKitBreakoutRoom !== liveKitClient.breakoutRoom &&
-          userId !== getGame().user?.id &&
-          !liveKitClient.isUserExternal(userId)
+          getBreakoutRoom(userId) !== liveKitClient.breakoutRoom &&
+          userId !== game.user.id
         );
       },
       callback: (players) => {
-        startBreakout(
-          players.data("user-id"),
-          liveKitClient.breakoutRoom,
-          liveKitClient
-        );
+        if (!players.dataset.userId) {
+          log.warn("No userId found in players dataset, pull to breakout");
+          return;
+        }
+        _startBreakout(players.dataset.userId, liveKitClient.breakoutRoom);
       },
     },
     {
-      name: getGame().i18n.localize(`${LANG_NAME}.leaveAVBreakout`),
+      name:
+        game.i18n?.localize(`${LANG_NAME}.leaveAVBreakout`) ??
+        "leaveAVBreakout",
       icon: '<i class="fas fa-comment-slash"></i>',
       condition: (players) => {
-        const userId: string = players[0].dataset.userId || "";
-        return userId === getGame().user?.id && !!liveKitClient.breakoutRoom;
+        const userId: string = players.dataset.userId ?? "";
+        return userId === game.user?.id && !!liveKitClient.breakoutRoom;
       },
       callback: () => {
-        breakout(null, liveKitClient);
+        breakout(undefined, liveKitClient);
       },
     },
     {
-      name: getGame().i18n.localize(`${LANG_NAME}.removeFromAVBreakout`),
+      name:
+        game.i18n?.localize(`${LANG_NAME}.removeFromAVBreakout`) ??
+        "removeFromAVBreakout",
       icon: '<i class="fas fa-comment-slash"></i>',
       condition: (players) => {
-        const userId: string = players[0].dataset.userId || "";
-        const liveKitBreakoutRoom = liveKitClient.settings.get(
-          "client",
-          `users.${userId}.liveKitBreakoutRoom`
-        );
+        const userId: string = players.dataset.userId ?? "";
         return (
-          getGame().user?.isGM === true &&
-          !!liveKitBreakoutRoom &&
-          userId !== getGame().user?.id
+          game.user?.isGM === true &&
+          !!getBreakoutRoom(userId) &&
+          userId !== game.user.id
         );
       },
       callback: (players) => {
-        if (typeof players[0].dataset.userId === "string") {
-          endUserBreakout(players[0].dataset.userId, liveKitClient);
+        if (typeof players.dataset.userId === "string") {
+          _endUserBreakout(players.dataset.userId);
         }
       },
     },
     {
-      name: getGame().i18n.localize(`${LANG_NAME}.endAllAVBreakouts`),
+      name:
+        game.i18n?.localize(`${LANG_NAME}.endAllAVBreakouts`) ??
+        "endAllAVBreakouts",
       icon: '<i class="fas fa-ban"></i>',
       condition: (players) => {
-        const userId: string = players[0].dataset.userId || "";
-        return getGame().user?.isGM === true && userId === getGame().user?.id;
+        const userId: string = players.dataset.userId ?? "";
+        return game.user?.isGM === true && userId === game.user.id;
       },
       callback: () => {
-        endAllBreakouts(liveKitClient);
+        _endAllBreakouts(liveKitClient);
       },
-    }
+    },
   );
 }
 
 export function breakout(
-  breakoutRoom: string | null,
-  liveKitClient: LiveKitClient
+  breakoutRoom: string | undefined,
+  liveKitClient: LiveKitClient,
 ): void {
   if (breakoutRoom === liveKitClient.breakoutRoom) {
     // Already in this room, skip
@@ -141,82 +158,84 @@ export function breakout(
 
   if (!breakoutRoom) {
     ui.notifications?.info(
-      `${getGame().i18n.localize(`${LANG_NAME}.leavingAVBreakout`)}`
+      game.i18n?.localize(`${LANG_NAME}.leavingAVBreakout`) ??
+        "leavingAVBreakout",
     );
   } else {
     ui.notifications?.info(
-      `${getGame().i18n.localize(`${LANG_NAME}.joiningAVBreakout`)}`
+      game.i18n?.localize(`${LANG_NAME}.joiningAVBreakout`) ??
+        "joiningAVBreakout",
     );
   }
 
   log.debug("Switching to breakout room:", breakoutRoom);
-  // log.info("Switching to breakout room:", breakoutRoom);
-  // log.warn("Switching to breakout room:", breakoutRoom);
   liveKitClient.breakoutRoom = breakoutRoom;
-  getGame().webrtc?.connect();
+  game.webrtc?.connect().catch(() => {
+    log.error("Failed to connect to breakout room");
+    liveKitClient.breakoutRoom = undefined;
+    ui.notifications?.error(
+      game.i18n.localize(`${LANG_NAME}.failedToJoinAVBreakout`),
+    );
+  });
 }
 
-function startBreakout(
+function _startBreakout(
   userId: string,
-  breakoutRoom: string | null,
-  liveKitClient: LiveKitClient
+  breakoutRoom: string | undefined,
 ): void {
-  if (!getGame().user?.isGM) {
+  if (!game.user?.isGM) {
     log.warn("Only a GM can start a breakout conference room");
     return;
   }
 
-  liveKitClient.settings.set(
-    "client",
-    `users.${userId}.liveKitBreakoutRoom`,
-    breakoutRoom
-  );
-  getGame().socket?.emit(
+  setBreakoutRoom(userId, breakoutRoom).catch((error: unknown) => {
+    log.error("Error setting breakout room:", error);
+  });
+
+  game.socket.emit(
     `module.${MODULE_NAME}`,
     {
       action: "breakout",
       userId,
       breakoutRoom,
     },
-    { recipients: [userId] }
+    { recipients: [userId] },
   );
 }
 
-function endUserBreakout(userId: string, liveKitClient: LiveKitClient) {
-  if (!getGame().user?.isGM) {
+function _endUserBreakout(userId: string) {
+  if (!game.user?.isGM) {
     log.warn("Only a GM can end a user's breakout conference");
     return;
   }
 
-  liveKitClient.settings.set(
-    "client",
-    `users.${userId}.liveKitBreakoutRoom`,
-    ""
-  );
-  getGame().socket?.emit(
+  setBreakoutRoom(userId, undefined).catch((error: unknown) => {
+    log.error("Error clearing breakout room:", error);
+  });
+  game.socket.emit(
     `module.${MODULE_NAME}`,
     {
       action: "breakout",
       userId,
-      breakoutRoom: null,
+      breakoutRoom: undefined,
     },
-    { recipients: [userId] }
+    { recipients: [userId] },
   );
 }
 
-function endAllBreakouts(liveKitClient: LiveKitClient): void {
-  if (!getGame().user?.isGM) {
+function _endAllBreakouts(liveKitClient: LiveKitClient): void {
+  if (!game.user?.isGM) {
     log.warn("Only a GM can end all breakout conference rooms");
     return;
   }
 
-  getGame().socket?.emit(`module.${MODULE_NAME}`, {
+  game.socket.emit(`module.${MODULE_NAME}`, {
     action: "breakout",
-    userId: null,
-    breakoutRoom: null,
+    userId: undefined,
+    breakoutRoom: undefined,
   });
 
   if (liveKitClient.breakoutRoom) {
-    breakout(null, liveKitClient);
+    breakout(undefined, liveKitClient);
   }
 }

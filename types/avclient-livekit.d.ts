@@ -1,15 +1,15 @@
 import LiveKitAVClient from "../src/LiveKitAVClient";
-
 /**
  * Interfaces
  */
 
 // LiveKit connection settings
-interface ConnectionSettings {
-  url: string;
-  room: string;
-  username: string;
-  password: string;
+interface LiveKitConnectionSettings {
+  serverType?: string;
+  url?: string;
+  room?: string;
+  username?: string;
+  password?: string;
 }
 
 interface LiveKitServerType {
@@ -23,25 +23,15 @@ interface LiveKitServerType {
   tokenFunction: LiveKitTokenFunction;
 }
 
-interface LiveKitServerTypes {
-  [key: string]: LiveKitServerType;
-}
+type LiveKitServerTypes = Record<string, LiveKitServerType>;
 
-interface LiveKitTokenFunction {
-  (
-    apiKey: string,
-    secretKey: string,
-    roomName: string,
-    userName: string,
-    metadata: string
-  ): Promise<string>;
-}
-
-// Custom voice modes to remove ACTIVITY
-interface LiveKitVoiceModes {
-  ALWAYS: "always";
-  PTT: "ptt";
-}
+type LiveKitTokenFunction = (
+  apiKey?: string,
+  secretKey?: string,
+  roomName: string,
+  userName: string,
+  metadata: string,
+) => Promise<string>;
 
 // Custom foundry socket message
 interface SocketMessage {
@@ -65,22 +55,55 @@ type LiveKitSettingsConfig = SettingConfig & {
   filePickerType?: string;
 };
 
+type BreakoutRoomRegistry = Record<string, string | undefined>;
+
 /**
  * Global settings
  */
-
-// Set AVSettings.VoiceModes to custom type
-declare global {
-  namespace AVSettings {
-    interface Overrides {
-      VoiceModes: LiveKitVoiceModes;
-    }
-  }
-}
 
 // Set game.webrtc.client to LiveKitAVClient
 declare global {
   interface WebRTCConfig {
     clientClass: typeof LiveKitAVClient;
+  }
+
+  // Add settings for the module
+  interface SettingConfig {
+    "avclient-livekit.liveKitConnectionSettings": LiveKitConnectionSettings;
+    "avclient-livekit.breakoutRoomRegistry": BreakoutRoomRegistry;
+    "avclient-livekit.displayConnectionQuality": foundry.data.fields.BooleanField<{
+      initial: true;
+    }>;
+    "avclient-livekit.audioMusicMode": foundry.data.fields.BooleanField<{
+      initial: false;
+    }>;
+    "avclient-livekit.useExternalAV": foundry.data.fields.BooleanField<{
+      initial: false;
+    }>;
+    "avclient-livekit.resetRoom": foundry.data.fields.BooleanField<{
+      initial: false;
+    }>;
+    "avclient-livekit.debug": foundry.data.fields.BooleanField<{
+      initial: false;
+    }>;
+    "avclient-livekit.devMode": foundry.data.fields.BooleanField<{
+      initial: false;
+    }>;
+    "avclient-livekit.authServer": foundry.data.fields.StringField<{
+      required: true;
+      blank: false;
+      initial: string;
+    }>;
+    "avclient-livekit.liveKitTrace": foundry.data.fields.BooleanField<{
+      initial: false;
+    }>;
+    "avclient-livekit.forceTurn": foundry.data.fields.BooleanField<{
+      initial: false;
+    }>;
+    "avclient-livekit.tavernPatreonToken": foundry.data.fields.StringField<{
+      required: false;
+      blank: true;
+      initial: string;
+    }>;
   }
 }

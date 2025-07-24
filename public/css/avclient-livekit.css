@@ -16,16 +16,9 @@
   border: 1px solid #f0f0e0;
   border-radius: 50%;
   display: inline-block;
-}
-
-.camera-view .connection-quality-indicator.is-version-10-av {
   position: absolute;
-  bottom: calc(var(--av-frame-absolute-margin) + 5px);
-  left: calc(16px + var(--av-frame-absolute-margin));
-}
-
-.camera-view .connection-quality-indicator.is-version-10-av.no-nameplate {
-  left: calc(4px + var(--av-frame-absolute-margin));
+  bottom: 10px;
+  right: 8px;
 }
 
 .camera-view .connection-quality-indicator.excellent {
@@ -70,4 +63,15 @@
 
 .camera-view .control-bar.left {
   z-index: 30;
+}
+
+/* HACK: Needed due to a bug in FVTT v13 */
+.camera-view .video-container .user-camera {
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
+
+#av-config .form-fields > button {
+  flex-basis: 100%;
 }

@@ -18,7 +18,7 @@
     "minimum": "9.238",
     "verified": "12"
   },
-  "esmodules": ["avclient-livekit.bundle.js"],
+  "esmodules": ["avclient-livekit.js"],
   "styles": ["css/avclient-livekit.css"],
   "socket": true,
   "url": "https://github.com/bekriebel/fvtt-module-avclient-livekit",
