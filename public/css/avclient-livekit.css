@@ -72,6 +72,11 @@
   object-fit: cover;
 }
 
+/* HACK: Needed due to a bug in FVTT v13 - flip the local camera */
+.camera-view .video-container .local-camera {
+  transform: scaleX(-1);
+}
+
 #av-config .form-fields > button {
   flex-basis: 100%;
 }
