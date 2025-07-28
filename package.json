@@ -26,7 +26,7 @@
     "livekit-client": "^2.15.3"
   },
   "devDependencies": {
-    "@eslint/js": "^9.31.0",
+    "@eslint/js": "^9.32.0",
     "@league-of-foundry-developers/foundry-vtt-types": "github:League-of-Foundry-Developers/foundry-vtt-types#main",
     "@pixi/assets": "github:foundry-vtt-types/pixi-assets#main",
     "@pixi/compressed-textures": "github:foundry-vtt-types/pixi-compressed-textures#main",
@@ -35,7 +35,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-basic-ssl": "^2.1.0",
-    "eslint": "^9.31.0",
+    "eslint": "^9.32.0",
     "prettier": "3.6.2",
     "typescript": "~5.8.3",
     "typescript-eslint": "8.38.0",
