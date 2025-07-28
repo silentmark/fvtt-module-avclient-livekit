@@ -1,5 +1,11 @@
 # LiveKit A/V Client for FoundryVTT: Changelog
 
+## 0.6.1
+
+- Mirror the local camera view, fixing a bug in core FoundryVTT v13.
+- Improve the initial loading when settings are empty, reducing the number of
+  reloads and eliminating the need for manual reloads.
+
 ## 0.6.0
 
 - Major refactor for FoundryVTT v13 compatibility
