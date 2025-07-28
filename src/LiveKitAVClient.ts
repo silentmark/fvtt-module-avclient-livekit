@@ -146,9 +146,9 @@ export default class LiveKitAVClient extends foundry.av.AVClient {
         "livekit serverType setting not found; defaulting to",
         this._liveKitClient.defaultLiveKitServerType.key,
       );
+      liveKitConnectionSettings.serverType =
+        this._liveKitClient.defaultLiveKitServerType.key;
       callWhenReady(() => {
-        liveKitConnectionSettings.serverType =
-          this._liveKitClient.defaultLiveKitServerType.key;
         game.settings
           .set(
             MODULE_NAME,
@@ -162,8 +162,6 @@ export default class LiveKitAVClient extends foundry.av.AVClient {
             );
           });
       });
-      // Return because a reconnect will occur
-      return false;
     }
 
     let liveKitServerType = this._liveKitClient.defaultLiveKitServerType;
@@ -255,8 +253,8 @@ export default class LiveKitAVClient extends foundry.av.AVClient {
     // Set a room name if one doesn't yet exist
     if (!liveKitConnectionSettings.room) {
       log.warn("No meeting room set, creating random name.");
+      liveKitConnectionSettings.room = foundry.utils.randomID(32);
       callWhenReady(() => {
-        liveKitConnectionSettings.room = foundry.utils.randomID(32);
         game.settings
           ?.set(
             MODULE_NAME,
@@ -267,8 +265,6 @@ export default class LiveKitAVClient extends foundry.av.AVClient {
             log.error("Error setting livekit room setting", error);
           });
       });
-      // Return because a reconnect will occur
-      return false;
     }
 
     // Set the room name, using breakout room if set
