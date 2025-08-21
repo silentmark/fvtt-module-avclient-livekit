@@ -1,5 +1,10 @@
 # LiveKit A/V Client for FoundryVTT: Changelog
 
+## 0.6.2
+
+- Update dependencies
+- Add Polish language translation (Thanks Jakub!)
+
 ## 0.6.1
 
 - Mirror the local camera view, fixing a bug in core FoundryVTT v13.
