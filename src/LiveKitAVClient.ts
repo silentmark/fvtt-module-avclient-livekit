@@ -61,6 +61,7 @@ export default class LiveKitAVClient extends foundry.av.AVClient {
     this._liveKitClient = new LiveKitClient(this);
     this.room = null;
     this.master.config = new LiveKitAVConfig({ webrtc: master });
+    Hooks.callAll("liveKitClientAvailable", this._liveKitClient);
   }
 
   /* -------------------------------------------- */
@@ -92,23 +93,21 @@ export default class LiveKitAVClient extends foundry.av.AVClient {
       game.user?.broadcastActivity({
         av: { hidden: false, muted: false },
       });
+    } else {
+      // Initialize the room
+      this._liveKitClient.initializeRoom();
 
-      this._liveKitClient.initState = InitState.Initialized;
-      return;
+      // Initialize the local tracks
+      await this._liveKitClient.initializeLocalTracks();
+
+      // Broadcast our current hidden & muted states
+      game.user?.broadcastActivity({
+        av: { muted: !this.isAudioEnabled(), hidden: !this.isVideoEnabled() },
+      });
     }
 
-    // Initialize the room
-    this._liveKitClient.initializeRoom();
-
-    // Initialize the local tracks
-    await this._liveKitClient.initializeLocalTracks();
-
-    // Broadcast our current hidden & muted states
-    game.user?.broadcastActivity({
-      av: { muted: !this.isAudioEnabled(), hidden: !this.isVideoEnabled() },
-    });
-
     this._liveKitClient.initState = InitState.Initialized;
+    Hooks.callAll("liveKitClientInitialized", this._liveKitClient);
   }
 
   /* -------------------------------------------- */
