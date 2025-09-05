@@ -16,6 +16,24 @@ import LiveKitAVConfig from "./LiveKitAVConfig";
 import { Logger } from "./utils/logger";
 import { DeepPartial } from "fvtt-types/utils";
 
+/**
+ * Establish types that are called in the LiveKitAVClient.
+ */
+declare module "fvtt-types/configuration" {
+  namespace Hooks {
+    interface HookConfig {
+      /**
+       * The LiveKit client is available, but not yet initialized.
+       */
+      liveKitClientAvailable: (client: LiveKitClient) => void;
+      /**
+       * The LiveKit client is available and initialized. It's ready for use.
+       */
+      liveKitClientInitialized: (client: LiveKitClient) => void;
+    }
+  }
+}
+
 const log = new Logger();
 
 if (import.meta.hot) {
