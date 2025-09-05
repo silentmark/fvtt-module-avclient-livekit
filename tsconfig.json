@@ -7,8 +7,9 @@
     "skipLibCheck": true,
 
     // Include FVTT Types
-    "types": ["@league-of-foundry-developers/foundry-vtt-types"],
-
+    "types": [
+      "fvtt-types"
+    ],
     /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
-    "@league-of-foundry-developers/foundry-vtt-types": "github:League-of-Foundry-Developers/foundry-vtt-types#main",
+    "fvtt-types": "github:League-of-Foundry-Developers/foundry-vtt-types#main",
     "@pixi/assets": "github:foundry-vtt-types/pixi-assets#main",
     "@pixi/compressed-textures": "github:foundry-vtt-types/pixi-compressed-textures#main",
     "@pixi/core": "github:foundry-vtt-types/pixi-core#main",

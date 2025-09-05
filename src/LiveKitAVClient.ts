@@ -14,7 +14,7 @@ import { callWhenReady, delayReload } from "./utils/helpers";
 import { LiveKitConnectionSettings } from "../types/avclient-livekit";
 import LiveKitAVConfig from "./LiveKitAVConfig";
 import { Logger } from "./utils/logger";
-import { DeepPartial } from "@league-of-foundry-developers/foundry-vtt-types/utils";
+import { DeepPartial } from "fvtt-types/utils";
 
 const log = new Logger();
 

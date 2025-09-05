@@ -1,4 +1,4 @@
-import { DeepPartial } from "@league-of-foundry-developers/foundry-vtt-types/utils";
+import { DeepPartial } from "fvtt-types/utils";
 import { LANG_NAME, MODULE_NAME } from "./utils/constants";
 import { delayReload } from "./utils/helpers";
 import { Logger } from "./utils/logger.js";
