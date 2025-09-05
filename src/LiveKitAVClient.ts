@@ -20,6 +20,7 @@ import { DeepPartial } from "fvtt-types/utils";
  * Establish types that are called in the LiveKitAVClient.
  */
 declare module "fvtt-types/configuration" {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Hooks {
     interface HookConfig {
       /**
@@ -61,7 +62,6 @@ export default class LiveKitAVClient extends foundry.av.AVClient {
     this._liveKitClient = new LiveKitClient(this);
     this.room = null;
     this.master.config = new LiveKitAVConfig({ webrtc: master });
-    Hooks.callAll("liveKitClientAvailable", this._liveKitClient);
   }
 
   /* -------------------------------------------- */
