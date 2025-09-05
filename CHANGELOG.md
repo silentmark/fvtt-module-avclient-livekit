@@ -1,5 +1,11 @@
 # LiveKit A/V Client for FoundryVTT: Changelog
 
+## 0.6.3
+
+- Update dependencies
+- Re-add custom hooks for custom service integrations
+- Fix nameplate fade issue when using the connection quality indicator
+
 ## 0.6.2
 
 - Update dependencies
