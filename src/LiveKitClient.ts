@@ -203,7 +203,7 @@ export default class LiveKitClient {
     );
 
     if (userNameBar instanceof Element) {
-      $(userNameBar).prepend(connectionQualityIndicator);
+      $(userNameBar).after(connectionQualityIndicator);
     }
 
     this.setConnectionQualityIndicator(userId);
